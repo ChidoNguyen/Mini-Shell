@@ -6,22 +6,129 @@ Chido Nguyen
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 
 
+//Parent ctrl-c handler//
+void catchSIGINT(int signo){
+	int x;
+	//just a dummy catch , child processes will gut this anyways//
+}
+
 
 /*
 nonBuiltParse()
 -We take the argument list and check for special characters like < > and final & symbols
+0 if <
+1 if >
+2 if both < > 
 */
-void nonBuiltParse(char** src, char** argv, int arg_count){
+void nonBuiltParse(char** arr, char** argv, int arg_count){
 	int j;
+	int caseNumber = -1;
+	int bground = -1;
+	int fname1=-1;
+	int fname2=-2;
+	int sourceFD, targetFD,result;
+	
+	// Check for file redirection symbols 
 	for(j = 0 ; j < arg_count; j++){
-		argv[j] = src[j];
+		if(strcmp(arr[j], "<") == 0){
+			caseNumber++;
+			fname1= j+1;
+			
+		}
+		else if (strcmp(arr[j], ">") == 0){
+			caseNumber++;
+			caseNumber++;
+			fname2 = j+1;
+		}
 	}
-	argv[arg_count] = NULL;
+	//open appropriate File descriptors // 
+	//For each case either 1 of either < or > is found , both or none//
+	//when found will either open for read or write and swap the with stdin/out via dup2 as needed//
+	//will also port over other arguments in command line prior to the redirection//
+	if(caseNumber == 0){
+		
+		sourceFD = open(arr[fname1], O_RDONLY);
+		if(sourceFD == -1){
+			perror("File can't be opened");
+			exit(1);
+		}
+		result = dup2(sourceFD, 0);
+		if(result == -1) {
+			perror("Source in failed");
+			exit(2);
+		}
+		
+		for(j = 0 ; j < fname1 -1; j++){
+			argv[j]=arr[j];
+		}
+		argv[fname1-1] = NULL;
+	}
+	else if (caseNumber == 1){
+		targetFD = open(arr[fname2],O_WRONLY | O_CREAT | O_TRUNC , 0644);
+		if(targetFD == -1){
+			perror("File can't be opened or failed to be created");
+			exit(1);
+		}
+		
+		result = dup2(targetFD,1);
+		if(result == -1) {
+			perror("Out target failed");
+			exit(2);
+		}
+		
+		for(j = 0 ; j < fname2 -1; j++){
+			argv[j]=arr[j];
+		}
+		argv[fname2-1] = NULL;
+	}
+	else if (caseNumber == 2){
+		sourceFD = open(arr[fname1], O_RDONLY);
+		if(sourceFD == -1){
+			perror("File can't be opened");
+			exit(1);
+		}
+		targetFD = open(arr[fname2],O_WRONLY | O_CREAT | O_TRUNC , 0644);
+		if(targetFD == -1){
+			perror("File can't be opened or failed to be created");
+			exit(1);
+		}
+		result = dup2(targetFD,1);
+		if(result == -1) {
+			perror("Out target failed");
+			exit(2);
+		}
+		result = dup2(sourceFD, 0);
+		if(result == -1) {
+			perror("Source in failed");
+			exit(2);
+		}
+		
+		if(fname1 < fname2){
+			for(j = 0 ; j < fname1 -1; j++){
+				argv[j]=arr[j];
+			}
+			argv[fname1-1] = NULL;
+		}
+		else{
+			for(j = 0 ; j < fname2 -1; j++){
+				argv[j]=arr[j];
+			}
+			argv[fname2-1] = NULL;
+		}
+	}
+	else{
+		for(j = 0 ; j < arg_count; j++){
+			argv[j] = arr[j];
+		}
+		argv[arg_count] = NULL;
+	}
 }
 
 
@@ -37,7 +144,6 @@ void not_my_problem(char** arr, int arg_count){
 	int childExitStatus= -5;
 	spawnPID = fork();
 	
-
 		if(spawnPID == -1){
 			perror("You goof'd\n");
 			exit(1);
@@ -46,16 +152,12 @@ void not_my_problem(char** arr, int arg_count){
 			char* argv[512];
 			memset(&argv, 0 , sizeof(argv));
 			nonBuiltParse(arr,argv,arg_count);
-			//writing to dev/null //
-			//https://stackoverflow.com/questions/14846768/in-c-how-do-i-redirect-stdout-fileno-to-dev-null-using-dup2-and-then-redirect
 			execvp(*argv,argv);
-			exit(1);
+			exit(0);
 		}
 		waitpid(spawnPID, &childExitStatus, 0);
-		if(WIFEXITED(childExitStatus) != 0)
-			printf("normal\n");
-		else
-			printf("NOT normal\n");
+		int exitStatus = WEXITSTATUS(childExitStatus);
+		printf("Exit Status: %i\n",exitStatus);
 }
 
 
@@ -180,6 +282,15 @@ void loop_sh(){
 }
 
 int main(){
+	struct sigaction SIGINT_action = {0};
+	
+	SIGINT_action.sa_handler=catchSIGINT;
+	sigfillset(&SIGINT_action.sa_mask);
+	SIGINT_action.sa_flags=0;
+	
+	//Registers sigint to siginit action struct //
+	sigaction(SIGINT, &SIGINT_action, NULL);
+	
 	loop_sh();
 	return 0;
 }
