@@ -16,8 +16,12 @@ Chido Nguyen
 nonBuiltParse()
 -We take the argument list and check for special characters like < > and final & symbols
 */
-void nonBuiltParse(){
-
+void nonBuiltParse(char** src, char** argv, int arg_count){
+	int j;
+	for(j = 0 ; j < arg_count; j++){
+		argv[j] = src[j];
+	}
+	argv[arg_count] = NULL;
 }
 
 
@@ -39,29 +43,20 @@ void not_my_problem(char** arr, int arg_count){
 			exit(1);
 		}
 		else if (spawnPID == 0){
-			printf("HI I AM CHILD MY PID : %i\n", getpid());
+			char* argv[512];
+			memset(&argv, 0 , sizeof(argv));
+			nonBuiltParse(arr,argv,arg_count);
+			//writing to dev/null //
+			//https://stackoverflow.com/questions/14846768/in-c-how-do-i-redirect-stdout-fileno-to-dev-null-using-dup2-and-then-redirect
+			execvp(*argv,argv);
 			exit(1);
 		}
 		waitpid(spawnPID, &childExitStatus, 0);
-		if( WIFEXITED(childExitStatus) != 0)
+		if(WIFEXITED(childExitStatus) != 0)
 			printf("normal\n");
-		printf("Parent my PID: %i\n", getpid());
+		else
+			printf("NOT normal\n");
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 /*
@@ -123,8 +118,8 @@ void arg_Process(char** arr, int arg_count){
 	else if (strcmp( command, "status") == 0){
 		exit(0);
 	}
-	//else
-		//not_my_problem(arr, arg_count);
+	else
+		not_my_problem(arr, arg_count);
 }
 
 
