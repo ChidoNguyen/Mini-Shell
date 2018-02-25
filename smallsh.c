@@ -131,7 +131,125 @@ void nonBuiltParse(char** arr, char** argv, int arg_count){
 	}
 }
 
-
+/*
+nonBuiltParse_Zombie()
+*/
+void nonBuiltParse_Zombie(char** arr, char** argv, int arg_count){
+	int j;
+	int caseNumber = -1;
+	int bground = -1;
+	int fname1=-1;
+	int fname2=-2;
+	int sourceFD, targetFD,result;
+	
+	// Check for file redirection symbols 
+	for(j = 0 ; j < arg_count; j++){
+		if(strcmp(arr[j], "<") == 0){
+			caseNumber++;
+			fname1= j+1;
+			
+		}
+		else if (strcmp(arr[j], ">") == 0){
+			caseNumber++;
+			caseNumber++;
+			fname2 = j+1;
+		}
+	}
+	//open appropriate File descriptors // 
+	//For each case either 1 of either < or > is found , both or none//
+	//when found will either open for read or write and swap the with stdin/out via dup2 as needed//
+	//will also port over other arguments in command line prior to the redirection//
+	if(caseNumber == 0){
+		
+		sourceFD = open(arr[fname1], O_RDONLY);
+		if(sourceFD == -1){
+			perror("File can't be opened");
+			exit(1);
+		}
+		result = dup2(sourceFD, 0);
+		if(result == -1) {
+			perror("Source in failed");
+			exit(2);
+		}
+		
+		for(j = 0 ; j < fname1 -1; j++){
+			argv[j]=arr[j];
+		}
+		argv[fname1-1] = NULL;
+	}
+	else if (caseNumber == 1){
+		targetFD = open(arr[fname2],O_WRONLY | O_CREAT | O_TRUNC , 0644);
+		if(targetFD == -1){
+			perror("File can't be opened or failed to be created");
+			exit(1);
+		}
+		
+		result = dup2(targetFD,1);
+		if(result == -1) {
+			perror("Out target failed");
+			exit(2);
+		}
+		
+		for(j = 0 ; j < fname2 -1; j++){
+			argv[j]=arr[j];
+		}
+		argv[fname2-1] = NULL;
+	}
+	else if (caseNumber == 2){
+		sourceFD = open(arr[fname1], O_RDONLY);
+		if(sourceFD == -1){
+			perror("File can't be opened");
+			exit(1);
+		}
+		targetFD = open(arr[fname2],O_WRONLY | O_CREAT | O_TRUNC , 0644);
+		if(targetFD == -1){
+			perror("File can't be opened or failed to be created");
+			exit(1);
+		}
+		result = dup2(targetFD,1);
+		if(result == -1) {
+			perror("Out target failed");
+			exit(2);
+		}
+		result = dup2(sourceFD, 0);
+		if(result == -1) {
+			perror("Source in failed");
+			exit(2);
+		}
+		
+		if(fname1 < fname2){
+			for(j = 0 ; j < fname1 -1; j++){
+				argv[j]=arr[j];
+			}
+			argv[fname1-1] = NULL;
+		}
+		else{
+			for(j = 0 ; j < fname2 -1; j++){
+				argv[j]=arr[j];
+			}
+			argv[fname2-1] = NULL;
+		}
+	}
+	else{
+		//https://stackoverflow.com/questions/14846768/in-c-how-do-i-redirect-stdout-fileno-to-dev-null-using-dup2-and-then-redirect//
+		//opening/closing to redirect dev/null
+		int dev_null = open("/dev/null",O_WRONLY);
+		result = dup2(dev_null, 0);
+		if(result == -1) {
+			perror("Source in failed");
+			exit(2);
+		}
+		result = dup2(dev_null,1);
+		if(result == -1) {
+			perror("Out target failed");
+			exit(2);
+		}
+		for(j = 0 ; j < arg_count; j++){
+			argv[j] = arr[j];
+		}
+		argv[arg_count] = NULL;
+	}
+}
 
 /*
 not_my_problem
@@ -154,24 +272,79 @@ void not_my_problem(char** arr, int arg_count){
 			nonBuiltParse(arr,argv,arg_count);
 			if(execvp(*argv,argv) < 0){
 				perror("Bad Command");
+				fflush(stderr);
 				exit(1);
 			}
 		}
 		waitpid(spawnPID, &childExitStatus, 0);
-		int exitStatus = WEXITSTATUS(childExitStatus);
 }
 
 /*
 zombie_land
 Alteration from normal exec function ( not_my_problem) we have to readjust and run our child processes in the background now
-Input: pointer to char of our string arguments , int arugment count , and int array to store the child processes in. 
+Input: pointer to char of our string arguments , int argument count , and int array to store the child processes in. 
 Output: void function no return.
 */
 void zombie_land( char** arr, int* hist, int arg_count){
-
+	pid_t spawnPID = -5;
+	int childExit = -5;
+	spawnPID = fork();
+	int j;
+	for(j = 0; j < 10; j++){
+		if(hist[j] == -1){
+			hist[j] = spawnPID;
+			break;
+		}
+	}
+	
+	if(spawnPID == -1){
+		perror("You goof'd\n");
+		exit(1);
+	}
+	else if(spawnPID == 0){
+		char* argv[512];
+		memset(&argv, 0, sizeof(argv));
+		printf("background pid is %i\n: ", getpid());
+		fflush(stdout);
+		nonBuiltParse_Zombie(arr,argv,arg_count-1);
+		if(execvp(*argv,argv) < 0){
+			perror("Bad Command");
+			fflush(stderr);
+			exit(1);
+		}
+	}
+	//waitpid(spawnPID, &childExit, 0);
 }
 
-
+/*
+double_tap()
+Scans our background PID to see if anything is done and should be cleaned up.
+Input: Takes an array of ints containing our spawn'd PIDS
+Outputs: Void function so nothing, excepts print to screen processes to which are done
+*/
+double_tap(int* PID){
+	int j;
+	int wp,ex_stat, ex_sig;
+	int childExit = -5;
+	for(j = 0; j < 10; j++){
+		if(PID[j] != -1){
+			if(waitpid(PID[j], &childExit, WNOHANG)){
+				if( WIFEXITED(childExit)){
+					printf("background pid %i is done: ", PID[j]);
+					ex_stat = WEXITSTATUS(childExit);
+					printf("exit status was %i\n",ex_stat);
+				}
+				if(WIFSIGNALED(childExit) != 0){
+					printf("background pid %i is done: ",PID[j]);
+					ex_sig = WTERMSIG(childExit);
+					printf("terminated with signal %i\n",ex_sig);
+				}
+				PID[j] = -1;
+			}
+			
+		}
+	}
+}
 
 /*
 amp_check
@@ -281,7 +454,8 @@ void loop_sh(){
 	char* pos;
 	memset(cmd_length, '\0', sizeof(cmd_length));
 	int arg_count = 0;
-	int bgPID[10] = {-1};
+	int bgPID[10];
+	memset(bgPID, -1, sizeof(bgPID));
 	
 	while(1){
 		//CLEARS array 
@@ -307,7 +481,7 @@ void loop_sh(){
 			else
 				arg_Process(arguments, arg_count);
 		}
-		
+		double_tap(bgPID);			//cleans up possible background PID aka double tab all the potential zombies
 		arg_count = 0;
 	}
 }
