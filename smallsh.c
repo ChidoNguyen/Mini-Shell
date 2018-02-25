@@ -15,7 +15,7 @@ Chido Nguyen
 
 //Parent ctrl-c handler//
 void catchSIGINT(int signo){
-	int x;
+	printf("Bypass\n");
 	//just a dummy catch , child processes will gut this anyways//
 }
 
@@ -152,14 +152,36 @@ void not_my_problem(char** arr, int arg_count){
 			char* argv[512];
 			memset(&argv, 0 , sizeof(argv));
 			nonBuiltParse(arr,argv,arg_count);
-			execvp(*argv,argv);
-			exit(0);
+			if(execvp(*argv,argv) < 0){
+				perror("Bad Command");
+				exit(1);
+			}
 		}
 		waitpid(spawnPID, &childExitStatus, 0);
 		int exitStatus = WEXITSTATUS(childExitStatus);
-		printf("Exit Status: %i\n",exitStatus);
 }
 
+/*
+zombie_land
+Alteration from normal exec function ( not_my_problem) we have to readjust and run our child processes in the background now
+Input: pointer to char of our string arguments , int arugment count , and int array to store the child processes in. 
+Output: void function no return.
+*/
+void zombie_land( char** arr, int* hist, int arg_count){
+
+}
+
+
+
+/*
+amp_check
+*/
+int amp_check(char** arr, int arg_count){
+	if(strcmp(arr[arg_count-1],"&") == 0){
+		return 1;
+	}
+	return 0;
+}
 
 /*
 arg_Parser
@@ -230,16 +252,21 @@ money_maker
 -Checks for any $$ and gets the shell PID
 Input: array of our parsed arguments and # of arguments
 Output: no returns, just print to screen of PID 
+https://fresh2refresh.com/c-programming/c-type-casting/c-itoa-function/
+https://stackoverflow.com/questions/12970439/gcc-error-undefined-reference-to-itoa
 */
-int money_maker(char** arr, int x){
+void money_maker(char** arr, int x){
+	//convert pid into string//
+	//search for $$ and replace with pID string if found//
 	int y;
+	int pID = getpid();
+	char buff[10] = {'\0'};
+	sprintf(buff, "%i", pID);
 	for(y = 0; y < x; y++){
 		if(strcmp( arr[y], "$$") ==0){
-			printf("%i\n", getpid());
-			return 0;
+			strcpy(arr[y],buff);
 		}
 	}
-	return 1;
 }
 
 
@@ -254,6 +281,7 @@ void loop_sh(){
 	char* pos;
 	memset(cmd_length, '\0', sizeof(cmd_length));
 	int arg_count = 0;
+	int bgPID[10] = {-1};
 	
 	while(1){
 		//CLEARS array 
@@ -272,9 +300,12 @@ void loop_sh(){
 		//do not parse if user has empty input or comment line //
 		if(cmd_length[0] != 0 && cmd_length[0] != '#'){
 			arg_Parser(cmd_length, arguments, &arg_count); //parse command into args
-			if(money_maker(arguments, arg_count)){
-				arg_Process(arguments, arg_count);
+			money_maker(arguments, arg_count);
+			if(amp_check(arguments,arg_count)){
+				zombie_land(arguments, bgPID, arg_count);
 			}
+			else
+				arg_Process(arguments, arg_count);
 		}
 		
 		arg_count = 0;
