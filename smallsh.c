@@ -11,14 +11,33 @@ Chido Nguyen
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
+int TSPT_GLOBAL;
 
+struct status_Pres {
+	int PID;
+	int childExitStat;
+};
+struct status_Pres child_HX;
 
 //Parent ctrl-c handler//
 void catchSIGINT(int signo){
-	printf("Bypass\n");
-	//just a dummy catch , child processes will gut this anyways//
+	char* Message = "terminated by signal 2\n";
+	write(STDOUT_FILENO, Message, 23);
+	
 }
 
+void catchSIGTSTP(int signo){
+	if(TSPT_GLOBAL){
+		TSPT_GLOBAL = 0;
+		char* sms = "\nEntering foreground-only mode (& is now ignored)\n";
+		write(STDOUT_FILENO, sms, 50);
+	}
+	else{
+		TSPT_GLOBAL = 1;
+		char * sms2 = "\nExiting foreground-only mode\n";
+		write(STDOUT_FILENO, sms2, 30);
+	}
+}
 
 /*
 nonBuiltParse()
@@ -259,9 +278,10 @@ Output: Void function with no return, except things will be dumped onto terminal
 */
 void not_my_problem(char** arr, int arg_count){
 	pid_t spawnPID = -5;
-	int childExitStatus= -5;
+	int ex_sig, ex_stat;
+	int childExitStatus= -10;
 	spawnPID = fork();
-	
+	child_HX.PID=spawnPID;
 		if(spawnPID == -1){
 			perror("You goof'd\n");
 			exit(1);
@@ -269,14 +289,18 @@ void not_my_problem(char** arr, int arg_count){
 		else if (spawnPID == 0){
 			char* argv[512];
 			memset(&argv, 0 , sizeof(argv));
-			nonBuiltParse(arr,argv,arg_count);
+			//If theres an ampersand + TSPT triggered we run it with 1 less argu aka the &
+			if(amp_check(arr, arg_count) && !(TSPT_GLOBAL))
+				nonBuiltParse(arr,argv,arg_count-1);
+			else
+				nonBuiltParse(arr,argv,arg_count);
 			if(execvp(*argv,argv) < 0){
 				perror("Bad Command");
 				fflush(stderr);
 				exit(1);
 			}
 		}
-		waitpid(spawnPID, &childExitStatus, 0);
+		int x = waitpid(spawnPID, &(child_HX.childExitStat), 0);
 }
 
 /*
@@ -333,11 +357,13 @@ double_tap(int* PID){
 					printf("background pid %i is done: ", PID[j]);
 					ex_stat = WEXITSTATUS(childExit);
 					printf("exit status was %i\n",ex_stat);
+					fflush(stdout);
 				}
 				if(WIFSIGNALED(childExit) != 0){
 					printf("background pid %i is done: ",PID[j]);
 					ex_sig = WTERMSIG(childExit);
 					printf("terminated with signal %i\n",ex_sig);
+					fflush(stdout);
 				}
 				PID[j] = -1;
 			}
@@ -404,24 +430,46 @@ arg_Process
 Input: Takes arguments array (char* arr[])
 Output: Void or maybe an Int depending on implementation inside function or returns
 */
-void arg_Process(char** arr, int arg_count){
+void arg_Process(char** arr, int arg_count, int *bgPID){
 	char * command = arr[0];
+	int x,ex_stat,ex_sig;
 	if(strcmp( command, "exit") == 0){
+		for (x = 0; x < 10; x++){
+			if(bgPID[x] != -1){
+				kill(bgPID[x], 15); // SIGTERM : https://linux.die.net/man/3/kill
+				bgPID[x] = -1;
+			}
+		}
 		exit(0);
 	}
 	else if(strcmp(command, "cd") == 0){
 		cd_handler(arr);
 	}
 	else if (strcmp( command, "status") == 0){
-		exit(0);
+		 if(WIFEXITED(child_HX.childExitStat)){
+			 ex_stat = WEXITSTATUS(child_HX.childExitStat);
+			printf("exit value %i\n",ex_stat);
+			fflush(stdout);
+		}
+		else{
+			if(WIFSIGNALED(child_HX.childExitStat) != 0){
+				ex_sig = WTERMSIG(child_HX.childExitStat);
+				printf("terminated with signal %i\n", ex_sig);
+				fflush(stdout);
+			}
+		}
 	}
-	else
-		not_my_problem(arr, arg_count);
+	else{
+		if(amp_check(arr,arg_count) && TSPT_GLOBAL) // TSPT when signaled will turn 1 and 0 
+			zombie_land(arr, bgPID, arg_count);
+		else
+			not_my_problem(arr, arg_count);
+	}
 }
 
 
 /*
-money_maker 
+money_maker : NOT FUNCTIONAL post expansion instead of PRE use maker II instead
 -Checks for any $$ and gets the shell PID
 Input: array of our parsed arguments and # of arguments
 Output: no returns, just print to screen of PID 
@@ -441,7 +489,38 @@ void money_maker(char** arr, int x){
 		}
 	}
 }
-
+/*
+money_maker_II
+Takes our command line and expands all $$ in to our PID before strtok
+input: our array of char for command input
+output: void return, does a string copy back into the original command array tho.
+*/
+void money_maker_II(char* cmd_in){
+	char buff[2048], PID[10];
+	memset(buff, '\0', sizeof(buff));
+	memset(PID, '\0', sizeof(PID));
+	int pID = getpid();
+	sprintf(PID, "%i", pID);
+	int x = 0; // cmd in ind
+	int y = 0; // buffer index
+	int z = 0; // pid buffer
+	while(cmd_in[x] != '\0'){
+		if(cmd_in[x] == '$' && cmd_in[x+1] == '$'){
+			while(PID[z] != '\0'){
+				buff[y] = PID[z];
+				y++;
+				z++;
+			}
+			z=0;
+			x++;
+		}
+		else
+			buff[y] = cmd_in[x];
+		x++;
+		y++;
+	}
+	strcpy(cmd_in,buff);
+}
 
 /*
 loop_sh
@@ -473,13 +552,14 @@ void loop_sh(){
 		
 		//do not parse if user has empty input or comment line //
 		if(cmd_length[0] != 0 && cmd_length[0] != '#'){
+			money_maker_II(cmd_length);
 			arg_Parser(cmd_length, arguments, &arg_count); //parse command into args
-			money_maker(arguments, arg_count);
-			if(amp_check(arguments,arg_count)){
+			//money_maker(arguments, arg_count);
+/* 			if(amp_check(arguments,arg_count)){
 				zombie_land(arguments, bgPID, arg_count);
 			}
-			else
-				arg_Process(arguments, arg_count);
+			else */
+				arg_Process(arguments, arg_count, bgPID);
 		}
 		double_tap(bgPID);			//cleans up possible background PID aka double tab all the potential zombies
 		arg_count = 0;
@@ -487,14 +567,23 @@ void loop_sh(){
 }
 
 int main(){
+	TSPT_GLOBAL = 1;
+	child_HX.childExitStat = -5;
+	
 	struct sigaction SIGINT_action = {0};
+	struct sigaction SIGTSTP_action = {0};
 	
 	SIGINT_action.sa_handler=catchSIGINT;
 	sigfillset(&SIGINT_action.sa_mask);
-	SIGINT_action.sa_flags=0;
+	SIGINT_action.sa_flags=SA_RESTART;
+	
+	SIGTSTP_action.sa_handler = catchSIGTSTP;
+	sigfillset(&SIGTSTP_action.sa_mask);
+	SIGTSTP_action.sa_flags=0;
 	
 	//Registers sigint to siginit action struct //
 	sigaction(SIGINT, &SIGINT_action, NULL);
+	sigaction(SIGTSTP,&SIGTSTP_action,NULL);
 	
 	loop_sh();
 	return 0;
