@@ -11,22 +11,38 @@ Chido Nguyen
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
-int TSPT_GLOBAL;
 
+// Global Variables //
+
+int TSPT_GLOBAL; // used as a "switch" for when TSTP is on and off
+
+// Signal handlers //
+struct sigaction SIGINT_action = {0};
+struct sigaction SIGTSTP_action = {0};
+struct sigaction ignore_action = {0};
+
+
+
+// Global struct to store the child's "childExitStatus" to be used with status command when called //
 struct status_Pres {
 	int PID;
 	int childExitStat;
 };
 struct status_Pres child_HX;
 
+
+//////////////////////////////Signal Catch Functions//////////////////////////////////////////
+
 //Parent ctrl-c handler//
 void catchSIGINT(int signo){
-	char* Message = "terminated by signal 2\n";
-	write(STDOUT_FILENO, Message, 23);
+	//char* Message = "terminated by signal 2\n";
+	//write(STDOUT_FILENO, Message, 23);
 	
 }
 
 void catchSIGTSTP(int signo){
+	
+	waitpid(child_HX.PID, &(child_HX.childExitStat), 0);
 	if(TSPT_GLOBAL){
 		TSPT_GLOBAL = 0;
 		char* sms = "\nEntering foreground-only mode (& is now ignored)\n";
@@ -38,6 +54,10 @@ void catchSIGTSTP(int signo){
 		write(STDOUT_FILENO, sms2, 30);
 	}
 }
+
+
+
+
 
 /*
 nonBuiltParse()
@@ -289,6 +309,13 @@ void not_my_problem(char** arr, int arg_count){
 		else if (spawnPID == 0){
 			char* argv[512];
 			memset(&argv, 0 , sizeof(argv));
+			
+			// This portion is only ran when forked so we can create an ignore_action for our child processes //
+			// Set to ignore SIGTSTP in child since SIG_IGN is passed and not gutted like other &functions //
+			ignore_action.sa_handler =SIG_IGN;
+			sigaction(SIGTSTP, &ignore_action, NULL);
+			
+			
 			//If theres an ampersand + TSPT triggered we run it with 1 less argu aka the &
 			if(amp_check(arr, arg_count) && !(TSPT_GLOBAL))
 				nonBuiltParse(arr,argv,arg_count-1);
@@ -301,6 +328,12 @@ void not_my_problem(char** arr, int arg_count){
 			}
 		}
 		int x = waitpid(spawnPID, &(child_HX.childExitStat), 0);
+		if(WIFSIGNALED(child_HX.childExitStat)){
+				ex_sig = WTERMSIG(child_HX.childExitStat);
+				printf("terminated with signal %i\n",ex_sig);
+				fflush(stdout);
+		}
+			
 }
 
 /*
@@ -570,8 +603,8 @@ int main(){
 	TSPT_GLOBAL = 1;
 	child_HX.childExitStat = -5;
 	
-	struct sigaction SIGINT_action = {0};
-	struct sigaction SIGTSTP_action = {0};
+	//struct sigaction SIGINT_action = {0};
+	//struct sigaction SIGTSTP_action = {0};
 	
 	SIGINT_action.sa_handler=catchSIGINT;
 	sigfillset(&SIGINT_action.sa_mask);
@@ -579,7 +612,7 @@ int main(){
 	
 	SIGTSTP_action.sa_handler = catchSIGTSTP;
 	sigfillset(&SIGTSTP_action.sa_mask);
-	SIGTSTP_action.sa_flags=0;
+	SIGTSTP_action.sa_flags=SA_RESTART;
 	
 	//Registers sigint to siginit action struct //
 	sigaction(SIGINT, &SIGINT_action, NULL);
