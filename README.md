@@ -3,5 +3,5 @@ A small shell program written in C to practice fork/exec and some basic shell co
 <br>
 *  C multi-process program (fork/join model)
 *  Main program handled 3 commands
-  *  Test
+   *  Test
 
